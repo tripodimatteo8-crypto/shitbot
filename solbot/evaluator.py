@@ -13,9 +13,15 @@ from .config import tunables
 from .db import Account, Candidate, EquitySnapshot, Position, Snapshot, session_scope, utcnow
 
 log = logging.getLogger("solbot.evaluator")
-HORIZONS = {"ret_1h": 1, "ret_6h": 6, "ret_24h": 24}
-WINDOW_MIN = 45  # tolleranza per trovare uno snapshot dopo l'orizzonte
+# orizzonti in minuti: il trading è di breve (minuti); 6h e 24h restano solo come contesto
+HORIZONS = {"ret_5m": 5, "ret_15m": 15, "ret_30m": 30, "ret_1h": 60, "ret_6h": 360, "ret_24h": 1440}
+SHORT_HORIZONS = ("ret_5m", "ret_15m", "ret_30m", "ret_1h")
 EST_ROUNDTRIP_COST_PCT = 6.0  # stima prudente usata per giudicare i candidati non comprati
+
+
+def _tolerance(minutes: int) -> timedelta:
+    """Tolleranza per trovare uno snapshot dopo l'orizzonte: stretta per gli orizzonti brevi."""
+    return timedelta(minutes=max(3, min(45, minutes * 0.3)))
 
 
 def _ret(p0: float | None, snap: Snapshot) -> float | None:
@@ -27,13 +33,14 @@ def _ret(p0: float | None, snap: Snapshot) -> float | None:
 
 
 def evaluate_candidates() -> int:
-    """Calcola gli esiti a 1h/6h/24h di tutti i candidati (anche filtrati, saltati, scaduti)."""
+    """Calcola gli esiti a 5m/15m/30m/1h (e 6h/24h di contesto) di tutti i candidati."""
     now = utcnow()
     updated = 0
     with session_scope() as s:
         todo = s.query(Candidate).filter(
-            Candidate.ts < now - timedelta(hours=1), Candidate.ts > now - timedelta(hours=27),
-            (Candidate.ret_1h.is_(None)) | (Candidate.ret_6h.is_(None)) | (Candidate.ret_24h.is_(None)),
+            Candidate.ts < now - timedelta(minutes=5), Candidate.ts > now - timedelta(hours=26),
+            (Candidate.ret_5m.is_(None)) | (Candidate.ret_15m.is_(None)) | (Candidate.ret_30m.is_(None))
+            | (Candidate.ret_1h.is_(None)) | (Candidate.ret_6h.is_(None)) | (Candidate.ret_24h.is_(None)),
         ).all()
         by_mint: dict[str, list[Candidate]] = defaultdict(list)
         for c in todo:
@@ -43,11 +50,12 @@ def evaluate_candidates() -> int:
             snaps = s.query(Snapshot).filter(Snapshot.mint == mint, Snapshot.ts >= t0).order_by(Snapshot.ts).all()
             for c in cs:
                 changed = False
-                for col, h in HORIZONS.items():
-                    if getattr(c, col) is not None or now < c.ts + timedelta(hours=h):
+                for col, mins in HORIZONS.items():
+                    target = c.ts + timedelta(minutes=mins)
+                    tol = _tolerance(mins)
+                    if getattr(c, col) is not None or now < target:
                         continue
-                    target = c.ts + timedelta(hours=h)
-                    snap = next((x for x in snaps if target <= x.ts <= target + timedelta(minutes=WINDOW_MIN)), None)
+                    snap = next((x for x in snaps if target <= x.ts <= target + tol), None)
                     if snap is None:
                         # nessuno snapshot nella finestra: se il token è sparito prima, è un rug
                         prev = [x for x in snaps if c.ts < x.ts <= target]
@@ -58,8 +66,14 @@ def evaluate_candidates() -> int:
                         if r is not None:
                             setattr(c, col, round(r, 2))
                             changed = True
+                if c.ret_1h is not None and c.max_ret_1h is None:
+                    window = [x for x in snaps if c.ts < x.ts <= c.ts + timedelta(minutes=60) + _tolerance(60)]
+                    rets = [r for r in (_ret(c.price_usd, x) for x in window) if r is not None]
+                    if rets:
+                        c.max_ret_1h, c.min_ret_1h = round(max(rets), 2), round(min(rets), 2)
+                        changed = True
                 if c.ret_24h is not None and c.max_ret_24h is None:
-                    window = [x for x in snaps if c.ts <= x.ts <= c.ts + timedelta(hours=24, minutes=WINDOW_MIN)]
+                    window = [x for x in snaps if c.ts <= x.ts <= c.ts + timedelta(hours=24) + _tolerance(1440)]
                     rets = [r for r in (_ret(c.price_usd, x) for x in window) if r is not None]
                     if rets:
                         c.max_ret_24h, c.min_ret_24h = round(max(rets), 2), round(min(rets), 2)
@@ -102,7 +116,7 @@ def max_drawdown_pct(values: list[float]) -> float:
 
 def _cohort(cs: list[Candidate]) -> dict:
     out = {"n": len(cs)}
-    for col in HORIZONS:
+    for col in SHORT_HORIZONS:
         vals = [getattr(c, col) for c in cs if getattr(c, col) is not None]
         if vals:
             out[col] = {
@@ -111,9 +125,12 @@ def _cohort(cs: list[Candidate]) -> dict:
                 "median": round(sorted(vals)[len(vals) // 2], 1),
                 "pct_above_costs": round(sum(v > EST_ROUNDTRIP_COST_PCT for v in vals) / len(vals) * 100, 1),
             }
-    rug = [c for c in cs if c.rugged_24h is not None]
+    rug = [c for c in cs if c.rug is not None]
     if rug:
-        out["rug_rate_24h"] = round(sum(c.rugged_24h for c in rug) / len(rug) * 100, 1)
+        out["rug_rate_1h"] = round(sum(c.rug for c in rug) / len(rug) * 100, 1)
+    dump = [c for c in cs if c.dump is not None]
+    if dump:
+        out["dump_rate_1h"] = round(sum(c.dump for c in dump) / len(dump) * 100, 1)
     return out
 
 

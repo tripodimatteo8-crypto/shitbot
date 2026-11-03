@@ -114,6 +114,11 @@ class Candidate(Base):
     status: Mapped[str] = mapped_column(String(16), index=True)
     decision_id: Mapped[int | None] = mapped_column(ForeignKey("decisions.id"))
     # esiti oggettivi (rendimento % del prezzo di mercato, senza costi)
+    ret_5m: Mapped[float | None] = mapped_column(Float)
+    ret_15m: Mapped[float | None] = mapped_column(Float)
+    ret_30m: Mapped[float | None] = mapped_column(Float)
+    max_ret_1h: Mapped[float | None] = mapped_column(Float)
+    min_ret_1h: Mapped[float | None] = mapped_column(Float)
     ret_1h: Mapped[float | None] = mapped_column(Float)
     ret_6h: Mapped[float | None] = mapped_column(Float)
     ret_24h: Mapped[float | None] = mapped_column(Float)
@@ -123,6 +128,7 @@ class Candidate(Base):
     # etichetta di apprendimento: True = rug (crollo/liquidità sparita entro 24h), False = no
     rug: Mapped[bool | None] = mapped_column(Boolean, index=True)
     rug_at: Mapped[datetime | None] = mapped_column(DateTime)
+    dump: Mapped[bool | None] = mapped_column(Boolean, index=True)  # calo >= dump_drop_pct entro l'orizzonte
 
 
 class Decision(Base):

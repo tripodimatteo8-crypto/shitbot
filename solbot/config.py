@@ -53,7 +53,9 @@ class Tunables(BaseSettings):
     collect_interval_s: int = 180
     agent_interval_s: int = 180
     monitor_interval_s: int = 30
-    evaluate_interval_s: int = 600
+    fast_track_interval_s: int = 60  # snapshot ravvicinati dei candidati recenti
+    fast_track_minutes: int = 70
+    evaluate_interval_s: int = 300
 
     # --- Claude ---
     claude_model: str = "claude-opus-5-5"
@@ -96,8 +98,9 @@ class Tunables(BaseSettings):
     require_sell_route: bool = True  # Jupiter deve quotare token->SOL
 
     # --- Apprendimento dai rug (codice) ---
-    rug_drop_pct: float = 80.0  # crollo dal prezzo del candidato che conta come rug
-    rug_horizon_hours: float = 6.0  # finestra di osservazione per l'etichetta rug / non rug
+    rug_drop_pct: float = 60.0  # crollo dal prezzo del candidato (entro l'orizzonte) che conta come rug
+    rug_horizon_hours: float = 1.0  # finestra breve di osservazione per le etichette rug / dump
+    dump_drop_pct: float = 20.0  # calo che conta come "dump" (avrebbe colpito lo stop loss)
     rug_liq_frac: float = 0.25  # liquidità sotto questa frazione di quella iniziale = rug
     learned_filter_enabled: bool = True
     learned_max_rug_prob: float = 0.5  # scarta se la probabilità di rug stimata supera questa
@@ -120,11 +123,11 @@ class Tunables(BaseSettings):
     max_position_pct: float = 5.0  # % equity massima per trade
     min_position_usd: float = 10.0
     max_open_positions: int = 6
-    stop_loss_pct: float = 25.0
-    take_profit_pct: float = 60.0
-    trailing_stop_pct: float = 25.0  # dal massimo, attivo dopo +30%
-    trailing_activation_pct: float = 30.0
-    max_hold_hours: float = 24.0
+    stop_loss_pct: float = 20.0
+    take_profit_pct: float = 40.0
+    trailing_stop_pct: float = 15.0  # dal massimo, attivo dopo +20%
+    trailing_activation_pct: float = 20.0
+    max_hold_hours: float = 1.0  # trading di breve: massimo 1 ora
     daily_loss_limit_pct: float = 8.0
     min_liquidity_to_hold_usd: float = 5_000  # sotto: uscita forzata
 

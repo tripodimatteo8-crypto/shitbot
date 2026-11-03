@@ -39,4 +39,18 @@ def print_report() -> None:
         print(f"Trade chiusi {tr['n']}  win rate {tr['win_rate']}%  PnL {tr['pnl_usd']:+.2f}$  PF {tr['profit_factor']}  "
               f"expectancy {tr['expectancy_usd']:+.2f}$  max DD {m['max_drawdown_pct']}%")
     u = today_usage()
-    print(f"Claude oggi: {u['calls']} chiamate, {u['tokens']:,} token, {u['usd']:.2f}$\n")
+    print(f"Claude oggi: {u['calls']} chiamate, {u['tokens']:,} token, {u['usd']:.2f}$")
+    from .config import tunables
+    from .learning import current_model, rug_creators, summary_for_prompt
+
+    t = tunables()
+    lm = current_model()
+    print("\n--- Apprendimento dai rug ---")
+    if not lm or lm["n"] == 0:
+        print(f"Nessun token ancora etichettato: le etichette arrivano {t.rug_horizon_hours:g}h dopo che il bot vede un token.")
+    else:
+        active = lm["n"] >= t.learned_min_total and lm["rugs"] >= t.learned_min_rugs
+        print(f"Token etichettati {lm['n']}, rug {lm['rugs']} (tasso base {lm['base_rate']:.0%}), creator in blacklist {len(rug_creators())}")
+        print("Filtro appreso: " + ("ATTIVO" if active else f"in raccolta dati (servono {t.learned_min_total} token e {t.learned_min_rugs} rug)"))
+        print(summary_for_prompt())
+    print()

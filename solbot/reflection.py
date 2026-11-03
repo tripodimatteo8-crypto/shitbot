@@ -16,7 +16,9 @@ from .lessons import current_lessons, save_lessons
 log = logging.getLogger("solbot.reflection")
 
 REFLECT_SYSTEM = """Sei il modulo di riflessione di SolBot, un agente di paper trading su memecoin Solana.
-Ricevi: le lezioni attuali, metriche oggettive calcolate dal codice, i trade chiusi con il motivo dell'agente, e gli esiti a 1h/6h/24h dei candidati (comprati, saltati, scartati dai filtri, scaduti).
+Il trading è di BREVE periodo: posizioni di minuti, chiuse al massimo dopo 1 ora.
+Ricevi: le lezioni attuali, metriche oggettive calcolate dal codice, i trade chiusi con il motivo dell'agente, gli esiti a 5/15/30 minuti e 1 ora dei candidati (comprati, saltati, scartati dai filtri, scaduti) con le etichette rug e dump entro 1 ora, e le statistiche di rischio per fascia.
+L'obiettivo è imparare indicatori di rischio e di opportunità osservabili PRIMA dell'acquisto che funzionano su questo orizzonte. Non avremo mai certezze: ragiona in probabilità e cita i numeri.
 Riscrivi lezioni.md in italiano, in Markdown:
 - Regole brevi e operative, ciascuna con evidenza numerica (es. "n=23, rendimento medio 6h -12%").
 - Marca ogni regola con [ipotesi, n=X] se i campioni sono meno di 30, [confermata, n=X] solo se n>=30 e l'effetto è netto e coerente.
@@ -54,7 +56,7 @@ def _dataset(days: int = 7) -> dict:
     with session_scope() as s:
         trades = s.query(Position).filter(Position.status == "closed", Position.closed_at >= since).order_by(Position.closed_at.desc()).limit(80).all()
         dec = {d.id: d for d in s.query(Decision).filter(Decision.ts >= since).all()}
-        cands = s.query(Candidate).filter(Candidate.ts >= since, (Candidate.ret_6h.isnot(None)) | (Candidate.rug.isnot(None))).order_by(Candidate.ts.desc()).limit(400).all()
+        cands = s.query(Candidate).filter(Candidate.ts >= since, (Candidate.ret_15m.isnot(None)) | (Candidate.rug.isnot(None))).order_by(Candidate.ts.desc()).limit(400).all()
         tr = [{
             "symbol": p.symbol, "pnl_pct": round(p.pnl_pct or 0, 1), "pnl_usd": round(p.pnl_usd or 0, 2),
             "held_min": round(((p.closed_at or utcnow()) - p.opened_at).total_seconds() / 60),
@@ -64,8 +66,8 @@ def _dataset(days: int = 7) -> dict:
             "f_at_buy": _features_at_buy(s, p),
         } for p in trades]
         cs = [{
-            "status": c.status, "symbol": c.symbol, "r1h": c.ret_1h, "r6h": c.ret_6h, "r24h": c.ret_24h,
-            "max24": c.max_ret_24h, "rug": c.rug,
+            "status": c.status, "symbol": c.symbol, "r5m": c.ret_5m, "r15m": c.ret_15m, "r30m": c.ret_30m, "r1h": c.ret_1h,
+            "max1h": c.max_ret_1h, "min1h": c.min_ret_1h, "rug": c.rug, "dump": c.dump,
             "filter": (c.filter_reasons or [None])[0],
             "skip_reason": dec[c.decision_id].reason[:160] if c.decision_id in dec and c.status == "skip" else None,
             "f": {k: (c.features or {}).get(k) for k in ("age_min", "liq", "mcap", "vol_liq_h1", "buy_ratio_h1", "chg_h1", "holders", "top10", "insider", "socials", "dex")},
@@ -104,7 +106,7 @@ def reflect(trigger: str) -> int | None:
         f"## Trade chiusi (recenti)\n{json.dumps(data['trades'], ensure_ascii=False)}\n\n"
         f"## Trade finiti in rug (perdita >= 50%)\n{json.dumps(data['rug_trades'], ensure_ascii=False)}\n\n"
         f"## Modello rug appreso dal codice\n{rug_text}\n\n"
-        f"## Esiti candidati (recenti; campo rug = crollo >=80% o liquidità sparita entro 6h)\n{json.dumps(data['candidates'], ensure_ascii=False)}"
+        f"## Esiti candidati (recenti; rug = crollo o liquidità sparita entro 1h, dump = stop loss colpito entro 1h)\n{json.dumps(data['candidates'], ensure_ascii=False)}"
     )
     system = REFLECT_SYSTEM.format(cost=m["est_roundtrip_cost_pct"])
     if backend == "claude_cli":

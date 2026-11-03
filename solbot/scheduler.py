@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from .agent import run_cycle
-from .collector import collect, refresh_open_positions
+from .collector import collect, fast_track, refresh_open_positions
 from .config import tunables
 from .db import Position, Snapshot, log_event, session_scope, utcnow
 from .evaluator import evaluate_candidates
@@ -114,6 +114,8 @@ def start() -> BackgroundScheduler:
     s.add_job(_safe("collect", collect), "interval", seconds=t.collect_interval_s, id="collect", next_run_time=now)
     s.add_job(_safe("agent", run_cycle), "interval", seconds=t.agent_interval_s, id="agent", next_run_time=now + timedelta(seconds=45))
     s.add_job(_safe("monitor", monitor_positions), "interval", seconds=t.monitor_interval_s, id="monitor", next_run_time=now + timedelta(seconds=20))
+    s.add_job(_safe("fast_track", fast_track), "interval", seconds=t.fast_track_interval_s, id="fast_track",
+              next_run_time=now + timedelta(seconds=30))
     s.add_job(_safe("evaluate", evaluate_and_learn), "interval", seconds=t.evaluate_interval_s, id="evaluate",
               next_run_time=now + timedelta(seconds=90))
     s.add_job(_safe("equity", heartbeat), "interval", seconds=300, id="equity", next_run_time=now + timedelta(seconds=5))
@@ -131,7 +133,8 @@ def reschedule() -> None:
     if not _sched:
         return
     t = tunables(force=True)
-    for jid, sec in (("collect", t.collect_interval_s), ("agent", t.agent_interval_s), ("monitor", t.monitor_interval_s), ("evaluate", t.evaluate_interval_s)):
+    for jid, sec in (("collect", t.collect_interval_s), ("agent", t.agent_interval_s), ("monitor", t.monitor_interval_s), ("evaluate", t.evaluate_interval_s),
+                     ("fast_track", t.fast_track_interval_s)):
         _sched.reschedule_job(jid, trigger="interval", seconds=sec)
 
 

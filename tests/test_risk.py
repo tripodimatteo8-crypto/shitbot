@@ -10,7 +10,7 @@ def acc(cash=1000.0):
     return Account(id=1, cash_usd=cash, initial_capital_usd=1000)
 
 
-def pos(now, entry=1.0, hw=1.0, hours=1):
+def pos(now, entry=1.0, hw=1.0, hours=1 / 6):
     return Position(mint="M", status="open", qty=1, cost_usd=1, entry_price_eff=1, entry_price_mkt=entry,
                     high_water_price=hw, opened_at=now - timedelta(hours=hours))
 

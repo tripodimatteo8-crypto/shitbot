@@ -149,6 +149,8 @@ def get_candidates(limit: int = 150, passed: bool | None = None):
             "passed": c.passed_filters, "reasons": c.filter_reasons, "status": c.status, "features": c.features,
             "decision_reason": decs[c.decision_id].reason if c.decision_id in decs else None,
             "decision_confidence": decs[c.decision_id].confidence if c.decision_id in decs else None,
+            "ret_5m": c.ret_5m, "ret_15m": c.ret_15m, "ret_30m": c.ret_30m, "max_ret_1h": c.max_ret_1h,
+            "min_ret_1h": c.min_ret_1h, "rug": c.rug, "dump": c.dump,
             "ret_1h": c.ret_1h, "ret_6h": c.ret_6h, "ret_24h": c.ret_24h, "max_ret_24h": c.max_ret_24h,
         } for c in rows]
 
@@ -192,6 +194,19 @@ def metrics_after_version(s, v: LessonVersion) -> dict:
             "expectancy_usd": round(sum(pnl) / len(ps), 2)}
 
 
+def _bucket_rows(m, t) -> list[dict]:
+    from .learning import BINS
+
+    rows = []
+    if m:
+        labels = {k: lab for k, lab, _ in BINS}
+        for key, buckets in m["features"].items():
+            for b, st in buckets.items():
+                rows.append({"feature": labels.get(key, key), "bucket": b, **st, "used": st["n"] >= t.learned_min_samples})
+        rows.sort(key=lambda x: (-x["used"], -x["rate"]))
+    return rows
+
+
 @app.get("/api/learning")
 def get_learning():
     from .learning import BINS, current_model, rug_creators
@@ -206,16 +221,13 @@ def get_learning():
                 blocked += 1
         rug_trades = s.query(Position).filter(Position.status == "closed", Position.pnl_pct <= -50).count()
         closed = s.query(Position).filter(Position.status == "closed").count()
-    rows = []
-    if m:
-        labels = {k: lab for k, lab, _ in BINS}
-        for key, buckets in m["features"].items():
-            for b, st in buckets.items():
-                rows.append({"feature": labels.get(key, key), "bucket": b, **st, "used": st["n"] >= t.learned_min_samples})
-        rows.sort(key=lambda x: (-x["used"], -x["rate"]))
+    rows = _bucket_rows(m, t)
     active = bool(m and m["n"] >= t.learned_min_total and m["rugs"] >= t.learned_min_rugs)
     return {
         "model": {k: m[k] for k in ("ts", "n", "rugs", "base_rate")} if m else None,
+        "dump": {k: m["dump"][k] for k in ("n", "rugs", "base_rate")} if m and m.get("dump") else None,
+        "dump_buckets": _bucket_rows(m.get("dump") if m else None, t)[:40],
+        "horizon_hours": t.rug_horizon_hours, "rug_drop_pct": t.rug_drop_pct, "dump_drop_pct": t.dump_drop_pct,
         "active": active, "needs": {"total": t.learned_min_total, "rugs": t.learned_min_rugs},
         "threshold": t.learned_max_rug_prob, "buckets": rows[:60], "blacklisted_creators": len(rug_creators()),
         "blocked_24h": blocked, "rug_trades": rug_trades, "closed_trades": closed,

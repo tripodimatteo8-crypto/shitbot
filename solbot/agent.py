@@ -23,7 +23,9 @@ Contesto:
 - Ricevi candidati che hanno GIÀ superato filtri di sicurezza in codice (authority, concentrazione holder, insider, liquidità, route di vendita). I filtri riducono i rug evidenti, non li eliminano.
 - I costi sono simulati in modo prudente: impatto di prezzo reale (quote Jupiter), buffer MEV/sniper ~1% per lato, fee aggregatore, priority fee, ritardo di esecuzione. Un round-trip costa spesso 3-8%: un trade ha senso solo se ti aspetti un movimento ben superiore.
 - Stop loss, take profit, trailing stop, tempo massimo di holding, dimensione massima per trade e limite di perdita giornaliera sono applicati dal codice: non puoi cambiarli. La size che chiedi può essere ridotta.
+- Orizzonte: trading di BREVE periodo, minuti. Ogni posizione viene chiusa dal codice al massimo dopo 1 ora. Valuta quindi il rischio e il potenziale nei prossimi 5-60 minuti, non nei prossimi giorni.
 - La maggior parte delle memecoin va a zero: saltare è spesso la scelta giusta. Ma senza trade non si impara: quando l'evidenza è ragionevole, prendi posizioni piccole.
+- Per ogni candidato ricevi, quando ci sono abbastanza dati, `rug_prob_appresa` e `dump_prob_appresa`: probabilità misurate dal codice che il token crolli (rug) o scenda fino allo stop loss (dump) entro 1 ora, con le fasce che le determinano. Non sono certezze: usale come indicatori di rischio.
 
 Il tuo compito in ogni ciclo:
 1. Per OGNI candidato elencato devi chiamare esattamente uno tra `paper_buy` e `skip_token`.
@@ -229,7 +231,10 @@ def _summary_line(c: Candidate) -> dict:
 
     f = c.features or {}
     p, why = rug_probability(f)
+    pd, why_d = rug_probability(f, target="dump")
     extra = {"rug_prob_appresa": round(p, 2), "rug_fasce": why} if p is not None else {}
+    if pd is not None:
+        extra.update({"dump_prob_appresa": round(pd, 2), "dump_fasce": why_d})
     return {**extra, "mint": c.mint, "symbol": c.symbol, "price_usd": c.price_usd, "liq_usd": round(c.liquidity_usd or 0),
             "mcap_usd": round(c.mcap_usd or 0), "age_min": round(c.age_minutes or 0), **{k: f.get(k) for k in (
                 "vol_h1", "vol_liq_h1", "buy_ratio_h1", "chg_m5", "chg_h1", "chg_h6", "holders", "top10", "insider",
@@ -449,6 +454,7 @@ def _run_baseline(ctx: CycleContext, cands: list[Candidate]) -> None:
         from .learning import rug_probability
 
         p_rug, _ = rug_probability(f)
+        p_dump, _ = rug_probability(f, target="dump")
         ch6 = f.get("chg_h6") or 0
         conds = {
             "0.55<buy_ratio_h1<=0.8": 0.55 < br <= 0.8,  # >0.8 = acquisti gonfiati da bot (pump & dump)
@@ -457,6 +463,7 @@ def _run_baseline(ctx: CycleContext, cands: list[Candidate]) -> None:
             "chg_h6<300": ch6 < 300,
             "socials": bool(f.get("socials")),
             "rug_prob<30%": p_rug is None or p_rug < 0.3,
+            "dump_prob<50%": p_dump is None or p_dump < 0.5,
         }
         okc = [k for k, v in conds.items() if v]
         if all(conds.values()):

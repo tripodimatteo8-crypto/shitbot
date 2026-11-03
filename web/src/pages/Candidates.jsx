@@ -52,9 +52,11 @@ export default function Candidates() {
                   <th>Liq / MCap</th>
                   <th>Età</th>
                   <th>Esito / decisione</th>
+                  <th>5m</th>
+                  <th>15m</th>
+                  <th>30m</th>
                   <th>1h</th>
-                  <th>6h</th>
-                  <th>24h</th>
+                  <th>Esito</th>
                 </tr>
               </thead>
               <tbody>
@@ -84,11 +86,22 @@ export default function Candidates() {
                         <div className="text-xs text-ink-3 mt-1">{(x.reasons || []).join(" · ")}</div>
                       )}
                     </td>
-                    {["ret_1h", "ret_6h", "ret_24h"].map((k) => (
+                    {["ret_5m", "ret_15m", "ret_30m", "ret_1h"].map((k) => (
                       <td key={k} className="text-xs">
                         <Signed v={x[k]}>{pct(x[k], 0)}</Signed>
                       </td>
                     ))}
+                    <td className="text-xs whitespace-nowrap">
+                      {x.rug ? (
+                        <span className="pill bg-bad/20 text-[#f0a0a0]">RUG</span>
+                      ) : x.dump ? (
+                        <span className="pill bg-warn/15 text-warn">DUMP</span>
+                      ) : x.rug === false ? (
+                        <span className="pill bg-good/15 text-[#7fd77f]">ok</span>
+                      ) : (
+                        <span className="text-ink-3">—</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -96,7 +109,8 @@ export default function Candidates() {
           </div>
         )}
         <div className="mt-2 text-xs text-ink-3">
-          Gli esiti 1h/6h/24h sono calcolati dal codice sul prezzo di mercato (senza costi), anche per i token scartati o saltati.
+          Gli esiti a 5/15/30 minuti e 1 ora sono calcolati dal codice sul prezzo di mercato (senza costi), anche per i token scartati o
+          saltati. RUG = crollo o liquidità sparita entro 1h; DUMP = calo che avrebbe colpito lo stop loss entro 1h.
         </div>
       </Section>
     </div>

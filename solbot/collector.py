@@ -17,7 +17,7 @@ log = logging.getLogger("solbot.collector")
 
 TRACK_HOURS = 26  # continuiamo a fotografare i token per valutare gli esiti a 24h
 RECHECK_MINUTES = 30  # un token può tornare candidato dopo questo intervallo
-PENDING_TTL_MINUTES = 20
+PENDING_TTL_MINUTES = 10  # trading di breve: una decisione su dati vecchi non vale
 SECURITY_CACHE_MINUTES = 30
 
 
@@ -174,3 +174,26 @@ def refresh_open_positions() -> list[tuple[int, float | None, float | None]]:
                 pos.last_liquidity = 0.0  # sparito da DexScreener
             out.append((pos.id, pos.last_price, pos.last_liquidity))
     return out
+
+
+def fast_track() -> int:
+    """Snapshot ogni minuto dei candidati visti di recente: servono per misurare gli esiti a 5/15/30 min
+    e per imparare gli indicatori di rischio di breve periodo."""
+    t = tunables()
+    now = utcnow()
+    with session_scope() as s:
+        mints = [m for (m,) in s.query(Candidate.mint).filter(Candidate.ts > now - timedelta(minutes=t.fast_track_minutes)).distinct().all()]
+        held = {m for (m,) in s.query(Position.mint).filter(Position.status == "open").all()}
+    mints = [m for m in mints if m not in held]  # le posizioni aperte le aggiorna già il monitor
+    if not mints:
+        return 0
+    p = get_provider()
+    md = p.market_data(mints)
+    ok = getattr(getattr(p, "dex", None), "last_ok_mints", set(md))
+    with session_scope() as s:
+        for m in mints:
+            if m in md:
+                _save_snapshot(s, md[m])
+            elif m in ok:
+                s.add(Snapshot(mint=m, price_usd=None, liquidity_usd=0.0))
+    return len(md)

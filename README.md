@@ -11,7 +11,7 @@ Agente di trading autonomo su memecoin Solana basato su Claude. Oggi opera **sol
 4. Agente Claude (tool use): get_token_data, get_security_report, get_portfolio, paper_buy, paper_sell, skip_token; motivo + confidence salvati.
 5. Paper engine prudente: quote Jupiter reali + buffer MEV, fee, priority fee, ritardo di esecuzione simulato.
 6. Risk manager fuori dall'agente: size max, posizioni max, SL/TP/tempo max eseguiti dal codice, perdita giornaliera, kill switch.
-7. Valutatore oggettivo: esito a 1h/6h/24h di OGNI candidato (anche scartati/saltati) + win rate, PnL, DD, profit factor, expectancy.
+7. Valutatore oggettivo: esito a 5m/15m/30m/1h di OGNI candidato (anche scartati/saltati) + win rate, PnL, DD, profit factor, expectancy.
 8. Riflessione giornaliera e ogni N trade: Claude riscrive `lezioni.md` (ipotesi con n. campioni), versioni salvate nel DB.
 9. FastAPI + dashboard React/Vite/Tailwind/Recharts; un comando di avvio; servizio launchd per il Mac mini.
 10. LiveEngine predisposto ma disabilitato dietro un gate di performance + conferma manuale.
@@ -83,7 +83,7 @@ solbot/
 web/              dashboard React + Vite + Tailwind + Recharts
 ```
 
-Cicli (modificabili da dashboard): collector 180s, agente 180s, monitor SL/TP 30s, valutatore 600s, equity 300s, riflessione giornaliera alle 03:17 (ora locale) e ogni N trade chiusi (default 15).
+Cicli (modificabili da dashboard): collector 180s, agente 180s, monitor SL/TP 30s, snapshot ravvicinati dei candidati 60s, valutatore e apprendimento 300s, equity 300s, riflessione giornaliera alle 03:17 (ora locale) e ogni N trade chiusi (default 15).
 
 ### Flusso di una decisione
 1. Il **collector** prende da DexScreener i token Solana appena profilati, in boost/trending, community takeover e le coppie trovate cercando pumpswap/pump.fun/raydium/meteora. Salva uno snapshot per ogni token seguito (per 26 ore).
@@ -93,15 +93,15 @@ Cicli (modificabili da dashboard): collector 180s, agente 180s, monitor SL/TP 30
 5. Solo i candidati che passano arrivano all'**agente**, che deve chiamare `paper_buy` o `skip_token` per ciascuno, con `reason` e `confidence`. Tutto finisce nel DB.
 6. Il **risk manager** ridimensiona o blocca l'ordine; il **PaperEngine** attende il ritardo simulato, chiede una quote reale a Jupiter e applica i costi.
 7. Il **monitor** (ogni 30s) aggiorna i prezzi ed esegue stop loss, take profit, trailing stop, tempo massimo e uscita per liquidità crollata.
-8. Il **valutatore** calcola l'esito a 1h/6h/24h di ogni candidato, compresi quelli scartati, saltati o scaduti. È la base oggettiva della riflessione.
+8. Il **valutatore** calcola l'esito a 5, 15, 30 minuti e 1 ora di ogni candidato, compresi quelli scartati, saltati o scaduti (snapshot ogni minuto per i candidati recenti). È la base oggettiva della riflessione.
 
 ### Apprendimento dai rug (automatico, anche senza Claude)
 RugCheck non vede tutto: un token "pulito" (authority revocate, holder distribuiti, LP bruciata) può comunque essere un pump & dump gestito da bot. Il caso tipico osservato: volume 1h pari a più di 5 volte la liquidità, ~87% di acquisti, +160% in 6h, poi −99%. Per questo il bot impara dai propri dati:
-1. **Etichetta**: ogni token visto, anche se scartato o saltato, diventa *rug* se entro 6h crolla dell'80% o la sua liquidità sparisce, *sano* se arriva a 6h senza crollo.
-2. **Modello**: per ogni fascia di vol/liq, quota di acquisti, variazione 1h/6h, età, liquidità, mcap, holder, top-10, insider, social e dex calcola il tasso di rug. Le fasce con abbastanza campioni si combinano in una probabilità di rug.
+1. **Etichette di breve periodo** (entro 1 ora): ogni token visto, anche se scartato o saltato, diventa *rug* se crolla del 60% o la sua liquidità sparisce, *dump* se scende del 20% (avrebbe colpito lo stop loss), *ok* altrimenti. Le etichette si assegnano solo a ora conclusa, così rug e casi sani sono confrontabili.
+2. **Modello**: per ogni fascia di vol/liq, quota di acquisti, variazione 1h/6h, età, liquidità, mcap, holder, top-10, insider, social e dex calcola il tasso di rug e di dump. Le fasce con abbastanza campioni si combinano in una probabilità di rug.
 3. **Filtro appreso**: scarta i candidati con rischio stimato ≥ 50%. Si attiva solo con almeno 60 token etichettati e 8 rug. I token scartati continuano a essere misurati, quindi il modello si corregge se sbaglia.
 4. **Blacklist creator**: i token di un creator che ha già fatto rug vengono scartati.
-5. **Claude** riceve la probabilità di rug di ogni candidato e le fasce più rischiose. Dopo 3 trade finiti in rug parte subito una riflessione, che deve aggiungere a `lezioni.md` una sezione "Rug: come riconoscerli".
+5. **Claude** riceve la probabilità di rug e di dump di ogni candidato e le fasce più rischiose. Dopo 3 trade finiti in rug parte subito una riflessione, che deve aggiungere a `lezioni.md` una sezione "Rug: come riconoscerli".
 
 Tutto è visibile in dashboard → "Cosa ha imparato" e regolabile in Impostazioni.
 
@@ -118,7 +118,7 @@ Tutto è visibile in dashboard → "Cosa ha imparato" e regolabile in Impostazio
 Con 30$ su token da 30-100k$ di liquidità un round-trip costa tipicamente il 4-10%.
 
 ### Protezioni (non modificabili dall'agente)
-Max 5% dell'equity per trade, max 6 posizioni, stop loss −25%, take profit +60%, trailing stop 25% dal massimo (attivo oltre +30%), holding massimo 24h, stop giornaliero a −8% dall'equity di inizio giornata, kill switch. L'agente non ha alcun tool per cambiarli: li modifichi solo tu dalla dashboard (Impostazioni) o dal `.env` (prefisso `SB_`).
+Trading di **breve periodo**: max 5% dell'equity per trade, max 6 posizioni, stop loss −20%, take profit +40%, trailing stop 15% dal massimo (attivo oltre +20%), holding massimo **1 ora**, stop giornaliero a −8% dall'equity di inizio giornata, kill switch. L'agente non ha alcun tool per cambiarli: li modifichi solo tu dalla dashboard (Impostazioni) o dal `.env` (prefisso `SB_`).
 
 ### Controllo dei costi di Claude
 - Claude viene chiamato solo se ci sono candidati che hanno superato i filtri (max 6 per ciclo).

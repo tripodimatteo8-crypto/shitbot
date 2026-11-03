@@ -24,7 +24,7 @@ def _seed(n_rug=30, n_ok=30):
         for i in range(n_ok):
             m = f"OK{i}"
             _cand(s, m, t0, 1.0, {"vol_liq_h1": 0.8, "buy_ratio_h1": 0.6, "chg_h6": 20, "holders": 2500})
-            s.add(Snapshot(mint=m, ts=t0 + timedelta(hours=6), price_usd=0.9, liquidity_usd=45_000))
+            s.add(Snapshot(mint=m, ts=t0 + timedelta(minutes=50), price_usd=0.9, liquidity_usd=45_000))
 
 
 def test_labels_rug_and_non_rug(fresh_db):
@@ -46,10 +46,10 @@ def test_liquidity_drain_counts_as_rug(fresh_db):
 
 
 def test_young_candidate_without_crash_stays_unlabeled(fresh_db):
-    t0 = utcnow() - timedelta(hours=2)
+    t0 = utcnow() - timedelta(minutes=30)
     with session_scope() as s:
         _cand(s, "YOUNG", t0, 1.0, {})
-        s.add(Snapshot(mint="YOUNG", ts=t0 + timedelta(minutes=30), price_usd=1.1, liquidity_usd=50_000))
+        s.add(Snapshot(mint="YOUNG", ts=t0 + timedelta(minutes=20), price_usd=1.1, liquidity_usd=50_000))
     learning.label_rugs()
     with session_scope() as s:
         assert s.query(Candidate).one().rug is None  # orizzonte non concluso: nessuna etichetta
@@ -92,3 +92,30 @@ def test_migration_adds_new_columns(tmp_path):
     init_db(f"sqlite:///{db}")
     cols = {r[1] for r in sqlite3.connect(db).execute("PRAGMA table_info(candidates)")}
     assert {"rug", "rug_at", "features"} <= cols
+
+
+def test_dump_label_short_horizon(fresh_db):
+    t0 = utcnow() - timedelta(hours=2)
+    with session_scope() as s:
+        _cand(s, "DIP", t0, 1.0, {})
+        s.add(Snapshot(mint="DIP", ts=t0 + timedelta(minutes=10), price_usd=0.75, liquidity_usd=45_000))  # -25%: stop loss
+        s.add(Snapshot(mint="DIP", ts=t0 + timedelta(minutes=50), price_usd=1.05, liquidity_usd=50_000))
+    learning.label_rugs()
+    with session_scope() as s:
+        c = s.query(Candidate).one()
+        assert c.rug is False and c.dump is True
+
+
+def test_short_horizon_outcomes(fresh_db):
+    from solbot.evaluator import evaluate_candidates
+
+    t0 = utcnow() - timedelta(minutes=70)
+    with session_scope() as s:
+        _cand(s, "FAST", t0, 1.0, {})
+        for mins, p in ((5, 1.1), (15, 1.3), (30, 0.9), (60, 0.8)):
+            s.add(Snapshot(mint="FAST", ts=t0 + timedelta(minutes=mins, seconds=30), price_usd=p, liquidity_usd=50_000))
+    evaluate_candidates()
+    with session_scope() as s:
+        c = s.query(Candidate).one()
+        assert (round(c.ret_5m), round(c.ret_15m), round(c.ret_30m), round(c.ret_1h)) == (10, 30, -10, -20)
+        assert round(c.max_ret_1h) == 30 and round(c.min_ret_1h) == -20

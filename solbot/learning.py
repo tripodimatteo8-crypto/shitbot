@@ -1,11 +1,14 @@
 """Apprendimento automatico dai rug (in codice, gira anche senza Claude).
 
+Il trading è di breve periodo (minuti): gli indicatori di rischio si imparano su un orizzonte breve.
+
 1. Etichetta: ogni candidato (comprato, saltato o scartato) viene marcato come rug se entro
-   l'orizzonte (default 6h) il prezzo crolla di almeno `rug_drop_pct` o la liquidità scende sotto
+   l'orizzonte (default 1h) il prezzo crolla di almeno `rug_drop_pct` o la liquidità scende sotto
    `rug_liq_frac` di quella iniziale; come non-rug se l'orizzonte passa senza crollo.
-   L'etichetta si assegna solo a orizzonte concluso, per non sovrastimare i rug.
+   In più come "dump" se nello stesso orizzonte scende di almeno `dump_drop_pct` (= stop loss colpito).
+   Le etichette si assegnano solo a orizzonte concluso, per non sovrastimare i casi negativi.
 2. Modello: per ogni feature (vol/liq, % acquisti, variazione 6h, età, holder, top-10, mcap...)
-   calcola il tasso di rug per fascia, con smoothing. Le fasce con abbastanza campioni si combinano
+   calcola il tasso di rug e di dump per fascia, con smoothing. Le fasce con abbastanza campioni si combinano
    (naive Bayes) in una probabilità di rug per ogni nuovo candidato.
 3. Filtro appreso: scarta i candidati con probabilità di rug >= soglia. I candidati scartati
    continuano a essere misurati, quindi il modello si corregge da solo se sbaglia.
@@ -94,11 +97,13 @@ def label_rugs() -> int:
                     if gone or crash or liq_drain:
                         hit = x
                         break
+                dumped = hit is not None or any(
+                    x.price_usd is not None and x.price_usd <= c.price_usd * (1 - t.dump_drop_pct / 100) for x in after)
                 if hit is not None:
-                    c.rug, c.rug_at = True, hit.ts
+                    c.rug, c.rug_at, c.dump = True, hit.ts, True
                     n += 1
                 elif any(x.ts >= c.ts + h / 2 for x in after):  # osservato abbastanza a lungo
-                    c.rug = False
+                    c.rug, c.dump = False, dumped
                     n += 1
     if n:
         log.info("Apprendimento: etichettati %d candidati (rug / non rug)", n)
@@ -106,16 +111,12 @@ def label_rugs() -> int:
 
 
 # ------------------------------------------------------------------ model
-def rebuild_model() -> dict:
-    """Ricalcola i tassi di rug per fascia su tutti i candidati etichettati (ultimi 14 giorni)."""
-    global _model
-    since = utcnow() - timedelta(days=14)
-    with session_scope() as s:
-        rows = s.query(Candidate.features, Candidate.rug, Candidate.mint).filter(Candidate.rug.isnot(None), Candidate.ts > since).all()
+def _build(rows: list[tuple[dict, bool, str]]) -> dict:
+    """Tassi per fascia per un'etichetta binaria. rows = (features, etichetta, mint)."""
     # un token può comparire più volte: lo contiamo una volta per fascia per non gonfiare i numeri
     total = len({m for _, _, m in rows})
-    rugs = len({m for _, r, m in rows if r})
-    base = (rugs + 1) / (total + 2)
+    pos = len({m for _, r, m in rows if r})
+    base = (pos + 1) / (total + 2)
     feats: dict[str, dict[str, dict]] = {}
     for key, label, edges in BINS:
         seen: dict[str, dict[str, bool]] = {}
@@ -129,15 +130,27 @@ def rebuild_model() -> dict:
         for b, mints in seen.items():
             n = len(mints)
             k = sum(mints.values())
-            # smoothing verso il tasso base (prior con peso 4 campioni)
-            rate = (k + 4 * base) / (n + 4)
+            rate = (k + 4 * base) / (n + 4)  # smoothing verso il tasso base (prior di 4 campioni)
             feats[key][b] = {"n": n, "rugs": k, "rate": round(rate, 4)}
-    model = {"ts": utcnow().isoformat(), "n": total, "rugs": rugs, "base_rate": round(base, 4), "features": feats}
+    return {"n": total, "rugs": pos, "base_rate": round(base, 4), "features": feats}
+
+
+def rebuild_model() -> dict:
+    """Ricalcola i tassi di rug e di dump per fascia su tutti i candidati etichettati (ultimi 14 giorni)."""
+    global _model
+    since = utcnow() - timedelta(days=14)
+    with session_scope() as s:
+        rows = s.query(Candidate.features, Candidate.rug, Candidate.dump, Candidate.mint).filter(
+            Candidate.rug.isnot(None), Candidate.ts > since).all()
+    model = _build([(f, r, m) for f, r, d, m in rows])
+    model["dump"] = _build([(f, d, m) for f, r, d, m in rows if d is not None])
+    model["ts"] = utcnow().isoformat()
     with _lock:
         _model = model
     with session_scope() as s:
-        s.add(LearnedModel(n_samples=total, n_rugs=rugs, base_rate=base, model=model))
-    log.info("Modello rug aggiornato: %d token etichettati, %d rug (tasso base %.0f%%)", total, rugs, base * 100)
+        s.add(LearnedModel(n_samples=model["n"], n_rugs=model["rugs"], base_rate=model["base_rate"], model=model))
+    log.info("Modello rischio aggiornato: %d token etichettati, %d rug (%.0f%%), %d dump (%.0f%%)", model["n"], model["rugs"],
+             model["base_rate"] * 100, model["dump"]["rugs"], model["dump"]["base_rate"] * 100)
     return model
 
 
@@ -154,10 +167,12 @@ def current_model() -> dict | None:
     return _model
 
 
-def rug_probability(features: dict, model: dict | None = None) -> tuple[float | None, list[str]]:
-    """Probabilità di rug stimata + spiegazione (fasce che pesano di più)."""
+def rug_probability(features: dict, model: dict | None = None, target: str = "rug") -> tuple[float | None, list[str]]:
+    """Probabilità stimata (rug o dump entro l'orizzonte breve) + spiegazione (fasce che pesano di più)."""
     t = tunables()
     model = model or current_model()
+    if model and target == "dump":
+        model = model.get("dump")
     if not model or model["n"] < t.learned_min_total or model["rugs"] < t.learned_min_rugs:
         return None, []
     base = model["base_rate"]
@@ -170,7 +185,7 @@ def rug_probability(features: dict, model: dict | None = None) -> tuple[float | 
             continue
         d = _logit(st["rate"]) - _logit(base)
         z += d
-        contrib.append((d, f"{label} {b}: {st['rugs']}/{st['n']} rug"))
+        contrib.append((d, f"{label} {b}: {st['rugs']}/{st['n']} {target}"))
     p = 1 / (1 + math.exp(-z))
     contrib.sort(reverse=True)
     return p, [c for d, c in contrib if d > 0][:3]
@@ -205,22 +220,36 @@ def rug_creators() -> set[str]:
     return creators
 
 
-def summary_for_prompt(max_lines: int = 12) -> str:
-    """Le fasce più e meno rischiose, in forma compatta per Claude."""
+def _bands(m: dict, max_lines: int) -> tuple[list[str], list[str]]:
     t = tunables()
-    m = current_model()
-    if not m or m["n"] < 20:
-        return "Statistiche rug: dati ancora insufficienti."
     rows = []
     for key, label, _ in BINS:
         for b, st in m["features"].get(key, {}).items():
             if st["n"] >= t.learned_min_samples:
-                rows.append((st["rate"], f"{label} {b}: {st['rugs']}/{st['n']} rug ({st['rate']:.0%})"))
+                rows.append((st["rate"], f"{label} {b}: {st['rugs']}/{st['n']} ({st['rate']:.0%})"))
     rows.sort(reverse=True)
-    risky = [r for _, r in rows[: max_lines // 2]]
-    safe = [r for _, r in rows[-(max_lines // 2):]][::-1]
-    return (f"Statistiche rug misurate dal codice (ultimi 14 giorni, {m['n']} token, {m['rugs']} rug, tasso base {m['base_rate']:.0%}):\n"
-            "Fasce più rischiose:\n- " + "\n- ".join(risky) + "\nFasce meno rischiose:\n- " + "\n- ".join(safe))
+    return [r for _, r in rows[: max_lines // 2]], [r for _, r in rows[-(max_lines // 2):]][::-1]
+
+
+def summary_for_prompt(max_lines: int = 12) -> str:
+    """Le fasce più e meno rischiose (rug e dump entro l'orizzonte breve), compatte per Claude."""
+    t = tunables()
+    m = current_model()
+    if not m or m["n"] < 20:
+        return "Statistiche di rischio a breve: dati ancora insufficienti."
+    h = f"{t.rug_horizon_hours:g}h"
+    out = [f"Statistiche di rischio misurate dal codice (ultimi 14 giorni, {m['n']} token, orizzonte {h}):"]
+    risky, safe = _bands(m, max_lines)
+    out.append(f"RUG (crollo >= {t.rug_drop_pct:g}% o liquidità sparita entro {h}), tasso base {m['base_rate']:.0%}.")
+    out.append("Fasce più rischiose:\n- " + "\n- ".join(risky or ["(poche fasce con campioni sufficienti)"]))
+    out.append("Fasce meno rischiose:\n- " + "\n- ".join(safe or ["-"]))
+    d = m.get("dump")
+    if d and d["n"] >= 20:
+        risky, safe = _bands(d, max_lines)
+        out.append(f"DUMP (calo >= {t.dump_drop_pct:g}% entro {h}, cioè stop loss colpito), tasso base {d['base_rate']:.0%}.")
+        out.append("Fasce con più dump:\n- " + "\n- ".join(risky or ["-"]))
+        out.append("Fasce con meno dump:\n- " + "\n- ".join(safe or ["-"]))
+    return "\n".join(out)
 
 
 def update() -> None:
@@ -229,4 +258,4 @@ def update() -> None:
     label_rugs()
     m = rebuild_model()
     if before and m["rugs"] > before.get("rugs", 0):
-        log_event("info", "learning", f"Modello rug: {m['rugs']} rug su {m['n']} token (tasso base {m['base_rate']:.0%})")
+        log_event("info", "learning", f"Modello rischio: {m['rugs']} rug e {m['dump']['rugs']} dump su {m['n']} token")
