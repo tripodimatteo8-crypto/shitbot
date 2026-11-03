@@ -30,6 +30,26 @@ def _safe(name, fn):
     return run
 
 
+def evaluate_and_learn() -> None:
+    from . import learning
+
+    evaluate_candidates()
+    learning.update()
+
+
+def maybe_reflect_on_rugs() -> None:
+    """Dopo N trade chiusi in rug (perdita >= 50%) dall'ultima riflessione, rifletti subito."""
+    from .db import LessonVersion
+
+    with session_scope() as s:
+        last = s.query(LessonVersion).filter(LessonVersion.trigger.notin_(["initial", "manual"])).order_by(LessonVersion.id.desc()).first()
+        since = last.ts if last else utcnow() - timedelta(days=30)
+        n = s.query(Position).filter(Position.status == "closed", Position.closed_at > since, Position.pnl_pct <= -50).count()
+    if n >= tunables().reflect_after_n_rugs:
+        log.info("%d trade in rug dall'ultima riflessione: rifletto subito", n)
+        reflect("rugs")
+
+
 def monitor_positions() -> None:
     """SL/TP/trailing/tempo massimo eseguiti dal codice, sempre attivi (anche col kill switch)."""
     rows = refresh_open_positions()
@@ -46,6 +66,7 @@ def monitor_positions() -> None:
             closed_any |= ok
     if closed_any:
         maybe_reflect_on_trades()
+        maybe_reflect_on_rugs()
 
 
 def reflect_daily() -> None:
@@ -93,7 +114,8 @@ def start() -> BackgroundScheduler:
     s.add_job(_safe("collect", collect), "interval", seconds=t.collect_interval_s, id="collect", next_run_time=now)
     s.add_job(_safe("agent", run_cycle), "interval", seconds=t.agent_interval_s, id="agent", next_run_time=now + timedelta(seconds=45))
     s.add_job(_safe("monitor", monitor_positions), "interval", seconds=t.monitor_interval_s, id="monitor", next_run_time=now + timedelta(seconds=20))
-    s.add_job(_safe("evaluate", evaluate_candidates), "interval", seconds=t.evaluate_interval_s, id="evaluate")
+    s.add_job(_safe("evaluate", evaluate_and_learn), "interval", seconds=t.evaluate_interval_s, id="evaluate",
+              next_run_time=now + timedelta(seconds=90))
     s.add_job(_safe("equity", heartbeat), "interval", seconds=300, id="equity", next_run_time=now + timedelta(seconds=5))
     s.add_job(_safe("reflect_daily", reflect_daily), "cron", hour=3, minute=17, id="reflect_daily")
     s.add_job(_safe("reflect_cli", reflect_periodic_cli), "interval", hours=t.cli_reflect_every_hours, id="reflect_cli",

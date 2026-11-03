@@ -57,5 +57,6 @@ class RugCheck:
             transfer_fee_pct=float(tf.get("pct") or 0),
             risks=[{"name": r.get("name"), "level": r.get("level"), "score": r.get("score")} for r in (d.get("risks") or [])],
             decimals=decimals,
+            creator=d.get("creator"),
             launchpad=(d.get("launchpad") or {}).get("name") if isinstance(d.get("launchpad"), dict) else d.get("deployPlatform"),
         )

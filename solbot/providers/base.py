@@ -68,6 +68,7 @@ class SecurityData:
     risks: list[dict] = field(default_factory=list)
     decimals: int | None = None
     launchpad: str | None = None
+    creator: str | None = None
     # Non disponibili gratis oggi (GMGN/Birdeye/Helius in futuro):
     sniper_pct: float | None = None
     bundle_pct: float | None = None

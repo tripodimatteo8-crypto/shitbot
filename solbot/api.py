@@ -192,6 +192,36 @@ def metrics_after_version(s, v: LessonVersion) -> dict:
             "expectancy_usd": round(sum(pnl) / len(ps), 2)}
 
 
+@app.get("/api/learning")
+def get_learning():
+    from .learning import BINS, current_model, rug_creators
+
+    t = tunables()
+    m = current_model()
+    with session_scope() as s:
+        since = utcnow() - timedelta(hours=24)
+        blocked = 0
+        for (r,) in s.query(Candidate.filter_reasons).filter(Candidate.ts >= since, Candidate.passed_filters.is_(False)).all():
+            if r and any(("appreso" in x) or ("blacklist" in x) for x in r):
+                blocked += 1
+        rug_trades = s.query(Position).filter(Position.status == "closed", Position.pnl_pct <= -50).count()
+        closed = s.query(Position).filter(Position.status == "closed").count()
+    rows = []
+    if m:
+        labels = {k: lab for k, lab, _ in BINS}
+        for key, buckets in m["features"].items():
+            for b, st in buckets.items():
+                rows.append({"feature": labels.get(key, key), "bucket": b, **st, "used": st["n"] >= t.learned_min_samples})
+        rows.sort(key=lambda x: (-x["used"], -x["rate"]))
+    active = bool(m and m["n"] >= t.learned_min_total and m["rugs"] >= t.learned_min_rugs)
+    return {
+        "model": {k: m[k] for k in ("ts", "n", "rugs", "base_rate")} if m else None,
+        "active": active, "needs": {"total": t.learned_min_total, "rugs": t.learned_min_rugs},
+        "threshold": t.learned_max_rug_prob, "buckets": rows[:60], "blacklisted_creators": len(rug_creators()),
+        "blocked_24h": blocked, "rug_trades": rug_trades, "closed_trades": closed,
+    }
+
+
 @app.post("/api/reflect")
 def post_reflect():
     from .reflection import reflect

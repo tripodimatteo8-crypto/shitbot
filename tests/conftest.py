@@ -43,6 +43,10 @@ def fresh_db(tmp_path, monkeypatch):
     with db.session_scope() as s:
         s.add(db.Setting(key="execution_delay_s", value=json.dumps(0)))
     config.invalidate_cache()
+    from solbot import learning
+
+    learning._model = None
+    learning._creators_cache = None
     prov = FakeProvider()
     set_provider(prov)
     yield prov

@@ -9,6 +9,7 @@ from sqlalchemy import func
 from .config import tunables
 from .db import Candidate, Position, SecurityReport, Snapshot, Token, log_event, session_scope, utcnow
 from .filters import features, market_prefilter, security_filter
+from .learning import learned_filter
 from .providers import get_provider
 from .providers.base import MarketData, SecurityData
 
@@ -26,7 +27,7 @@ def _sec_from_row(r: SecurityReport) -> SecurityData:
         rugged=r.rugged, holders=r.holders, top10_pct=r.top10_pct, max_holder_pct=r.max_holder_pct,
         insider_pct=r.insider_pct, insiders_detected=r.insiders_detected, lp_locked_pct=r.lp_locked_pct,
         creator_pct=r.creator_pct, transfer_fee_pct=r.transfer_fee_pct, risks=r.risks or [], decimals=r.decimals,
-        launchpad=r.launchpad,
+        launchpad=r.launchpad, creator=r.creator,
     )
 
 
@@ -43,7 +44,7 @@ def get_security(mint: str, max_age_min: int = SECURITY_CACHE_MINUTES) -> Securi
                 score_norm=sec.score_norm, rugged=sec.rugged, holders=sec.holders, top10_pct=sec.top10_pct,
                 max_holder_pct=sec.max_holder_pct, insider_pct=sec.insider_pct, insiders_detected=sec.insiders_detected,
                 lp_locked_pct=sec.lp_locked_pct, creator_pct=sec.creator_pct, transfer_fee_pct=sec.transfer_fee_pct,
-                risks=sec.risks, decimals=sec.decimals, launchpad=sec.launchpad,
+                risks=sec.risks, decimals=sec.decimals, launchpad=sec.launchpad, creator=sec.creator,
             ))
             tok = s.get(Token, mint)
             if tok and sec.decimals is not None:
@@ -125,6 +126,8 @@ def collect() -> dict:
         if not reasons:
             sec = get_security(mint)
             reasons = security_filter(sec, t)
+            if not reasons:
+                reasons = learned_filter(features(md, sec, now), sec.creator if sec else None)
             if not reasons and t.require_sell_route and md.price_usd:
                 dec = sec.decimals if sec and sec.decimals is not None else 6
                 q = p.quote_sell(mint, 20 / md.price_usd, dec)

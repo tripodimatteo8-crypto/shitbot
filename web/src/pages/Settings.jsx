@@ -4,6 +4,7 @@ import { Empty, Section } from "../ui";
 
 const GROUPS = [
   ["Filtri (codice, prima di Claude)", ["min_liquidity_usd", "max_liquidity_usd", "min_mcap_usd", "max_mcap_usd", "min_age_minutes", "max_age_hours", "min_volume_h1_usd", "min_txns_h1", "min_sells_h1", "max_top10_pct", "max_single_holder_pct", "max_insider_pct", "min_holders", "max_rugcheck_score_norm", "require_no_mint_authority", "require_no_freeze_authority", "require_sell_route"]],
+  ["Apprendimento dai rug", ["learned_filter_enabled", "learned_max_rug_prob", "learned_min_samples", "learned_min_total", "learned_min_rugs", "rug_drop_pct", "rug_liq_frac", "rug_horizon_hours", "creator_blacklist_enabled", "reflect_after_n_rugs"]],
   ["Limiti di rischio (fuori dall'agente)", ["max_position_pct", "min_position_usd", "max_open_positions", "stop_loss_pct", "take_profit_pct", "trailing_stop_pct", "trailing_activation_pct", "max_hold_hours", "daily_loss_limit_pct", "min_liquidity_to_hold_usd"]],
   ["Costi simulati", ["swap_fee_pct", "priority_fee_sol", "network_fee_sol", "mev_buffer_pct", "execution_delay_s", "fallback_slippage_floor_pct"]],
   ["Cicli (secondi)", ["collect_interval_s", "agent_interval_s", "monitor_interval_s", "evaluate_interval_s"]],

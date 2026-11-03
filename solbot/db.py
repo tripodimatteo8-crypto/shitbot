@@ -92,6 +92,7 @@ class SecurityReport(Base):
     risks: Mapped[list | None] = mapped_column(JSON)
     decimals: Mapped[int | None] = mapped_column(Integer)
     launchpad: Mapped[str | None] = mapped_column(String(64))
+    creator: Mapped[str | None] = mapped_column(String(64), index=True)
 
 
 class Candidate(Base):
@@ -119,6 +120,9 @@ class Candidate(Base):
     max_ret_24h: Mapped[float | None] = mapped_column(Float)
     min_ret_24h: Mapped[float | None] = mapped_column(Float)
     rugged_24h: Mapped[bool | None] = mapped_column(Boolean)
+    # etichetta di apprendimento: True = rug (crollo/liquidità sparita entro 24h), False = no
+    rug: Mapped[bool | None] = mapped_column(Boolean, index=True)
+    rug_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Decision(Base):
@@ -230,6 +234,18 @@ class LessonVersion(Base):
     closed_trades: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class LearnedModel(Base):
+    """Versioni del modello di rischio rug appreso dai dati."""
+
+    __tablename__ = "learned_models"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    n_samples: Mapped[int] = mapped_column(Integer)
+    n_rugs: Mapped[int] = mapped_column(Integer)
+    base_rate: Mapped[float] = mapped_column(Float)
+    model: Mapped[dict] = mapped_column(JSON)
+
+
 class EventLog(Base):
     __tablename__ = "events"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -259,8 +275,22 @@ def init_db(url: str | None = None):
         cur.close()
 
     Base.metadata.create_all(_engine)
+    _add_missing_columns(_engine)
     _Session = sessionmaker(bind=_engine, expire_on_commit=False)
     return _engine
+
+
+def _add_missing_columns(engine) -> None:
+    """Migrazione minima: aggiunge le colonne nuove alle tabelle esistenti (SQLite)."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            existing = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name not in existing:
+                    conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN "{col.name}" {col.type.compile(engine.dialect)}'))
 
 
 @contextmanager

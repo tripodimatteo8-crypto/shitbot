@@ -95,6 +95,16 @@ Cicli (modificabili da dashboard): collector 180s, agente 180s, monitor SL/TP 30
 7. Il **monitor** (ogni 30s) aggiorna i prezzi ed esegue stop loss, take profit, trailing stop, tempo massimo e uscita per liquidità crollata.
 8. Il **valutatore** calcola l'esito a 1h/6h/24h di ogni candidato, compresi quelli scartati, saltati o scaduti. È la base oggettiva della riflessione.
 
+### Apprendimento dai rug (automatico, anche senza Claude)
+RugCheck non vede tutto: un token "pulito" (authority revocate, holder distribuiti, LP bruciata) può comunque essere un pump & dump gestito da bot. Il caso tipico osservato: volume 1h pari a più di 5 volte la liquidità, ~87% di acquisti, +160% in 6h, poi −99%. Per questo il bot impara dai propri dati:
+1. **Etichetta**: ogni token visto, anche se scartato o saltato, diventa *rug* se entro 6h crolla dell'80% o la sua liquidità sparisce, *sano* se arriva a 6h senza crollo.
+2. **Modello**: per ogni fascia di vol/liq, quota di acquisti, variazione 1h/6h, età, liquidità, mcap, holder, top-10, insider, social e dex calcola il tasso di rug. Le fasce con abbastanza campioni si combinano in una probabilità di rug.
+3. **Filtro appreso**: scarta i candidati con rischio stimato ≥ 50%. Si attiva solo con almeno 60 token etichettati e 8 rug. I token scartati continuano a essere misurati, quindi il modello si corregge se sbaglia.
+4. **Blacklist creator**: i token di un creator che ha già fatto rug vengono scartati.
+5. **Claude** riceve la probabilità di rug di ogni candidato e le fasce più rischiose. Dopo 3 trade finiti in rug parte subito una riflessione, che deve aggiungere a `lezioni.md` una sezione "Rug: come riconoscerli".
+
+Tutto è visibile in dashboard → "Cosa ha imparato" e regolabile in Impostazioni.
+
 ### Costi simulati (prudenti)
 | Voce | Default |
 |---|---|

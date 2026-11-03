@@ -95,6 +95,18 @@ class Tunables(BaseSettings):
     require_no_freeze_authority: bool = True
     require_sell_route: bool = True  # Jupiter deve quotare token->SOL
 
+    # --- Apprendimento dai rug (codice) ---
+    rug_drop_pct: float = 80.0  # crollo dal prezzo del candidato che conta come rug
+    rug_horizon_hours: float = 6.0  # finestra di osservazione per l'etichetta rug / non rug
+    rug_liq_frac: float = 0.25  # liquidità sotto questa frazione di quella iniziale = rug
+    learned_filter_enabled: bool = True
+    learned_max_rug_prob: float = 0.5  # scarta se la probabilità di rug stimata supera questa
+    learned_min_samples: int = 15  # campioni minimi in una fascia per usarla
+    learned_min_total: int = 60  # token etichettati minimi prima di attivare il filtro
+    learned_min_rugs: int = 8
+    creator_blacklist_enabled: bool = True
+    reflect_after_n_rugs: int = 3  # riflessione dopo N trade chiusi in rug
+
     # --- Paper portfolio / costi simulati (prudenti) ---
     initial_capital_usd: float = 1000.0
     swap_fee_pct: float = 0.25  # fee piattaforma/aggregatore oltre alla fee AMM già nella quote

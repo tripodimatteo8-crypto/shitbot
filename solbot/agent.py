@@ -215,9 +215,22 @@ def _pending_candidates(limit: int) -> list[Candidate]:
                 .order_by(Candidate.ts.desc(), Candidate.liquidity_usd.desc()).limit(limit).all())
 
 
+def rug_summary() -> str:
+    from .learning import summary_for_prompt
+
+    try:
+        return summary_for_prompt()
+    except Exception:
+        return ""
+
+
 def _summary_line(c: Candidate) -> dict:
+    from .learning import rug_probability
+
     f = c.features or {}
-    return {"mint": c.mint, "symbol": c.symbol, "price_usd": c.price_usd, "liq_usd": round(c.liquidity_usd or 0),
+    p, why = rug_probability(f)
+    extra = {"rug_prob_appresa": round(p, 2), "rug_fasce": why} if p is not None else {}
+    return {**extra, "mint": c.mint, "symbol": c.symbol, "price_usd": c.price_usd, "liq_usd": round(c.liquidity_usd or 0),
             "mcap_usd": round(c.mcap_usd or 0), "age_min": round(c.age_minutes or 0), **{k: f.get(k) for k in (
                 "vol_h1", "vol_liq_h1", "buy_ratio_h1", "chg_m5", "chg_h1", "chg_h6", "holders", "top10", "insider",
                 "rug_score", "dex", "socials", "boosted", "sources")}}
@@ -345,6 +358,7 @@ def _run_cli(ctx: CycleContext, cands: list[Candidate], lessons: str) -> None:
     prompt = (
         f"Ora (UTC): {utcnow().strftime('%Y-%m-%d %H:%M')}\n\n"
         f"Portafoglio:\n{json.dumps(tool_get_portfolio(), ensure_ascii=False)}\n\n"
+        f"{rug_summary()}\n\n"
         f"Candidati di questo ciclo ({len(cands)}), già filtrati:\n"
         + "\n".join(json.dumps(d, ensure_ascii=False, default=str) for d in details)
         + "\n\nRispondi con il JSON richiesto."
@@ -380,6 +394,7 @@ def _run_claude(ctx: CycleContext, cands: list[Candidate], lessons: str) -> None
     user = (
         f"Ora (UTC): {utcnow().strftime('%Y-%m-%d %H:%M')}\n\n"
         f"Portafoglio:\n{json.dumps(portfolio, ensure_ascii=False)}\n\n"
+        f"{rug_summary()}\n\n"
         f"Candidati di questo ciclo ({len(cands)}), già filtrati:\n"
         + "\n".join(json.dumps(_summary_line(c), ensure_ascii=False) for c in cands)
         + "\n\nDecidi per ciascun candidato (paper_buy o skip_token)."
@@ -431,11 +446,17 @@ def _run_baseline(ctx: CycleContext, cands: list[Candidate]) -> None:
     for c in cands:
         f = c.features or {}
         br, ch1, vl = f.get("buy_ratio_h1") or 0, f.get("chg_h1") or 0, f.get("vol_liq_h1") or 0
+        from .learning import rug_probability
+
+        p_rug, _ = rug_probability(f)
+        ch6 = f.get("chg_h6") or 0
         conds = {
-            "buy_ratio_h1>0.55": br > 0.55,
+            "0.55<buy_ratio_h1<=0.8": 0.55 < br <= 0.8,  # >0.8 = acquisti gonfiati da bot (pump & dump)
             "0<chg_h1<80": 0 < ch1 < 80,
-            "vol/liq_h1>0.5": vl > 0.5,
+            "0.5<vol/liq_h1<=4": 0.5 < vl <= 4,  # >4 = probabile wash trading
+            "chg_h6<300": ch6 < 300,
             "socials": bool(f.get("socials")),
+            "rug_prob<30%": p_rug is None or p_rug < 0.3,
         }
         okc = [k for k, v in conds.items() if v]
         if all(conds.values()):

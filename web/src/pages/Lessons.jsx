@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { diffLines } from "diff";
 import { api, time, usd, usePoll } from "../api";
 import { Empty, Section } from "../ui";
+import RugModel from "./RugModel.jsx";
 
 function MetricBox({ title, m }) {
   return (
@@ -32,10 +33,12 @@ export default function Lessons() {
   const parts = useMemo(() => (cur && prev ? diffLines(prev.content, cur.content) : null), [cur, prev]);
   const reflect = async () => {
     await api("/reflect", { method: "POST" });
-    alert("Riflessione avviata: la nuova versione comparirà tra qualche minuto (serve ANTHROPIC_API_KEY).");
+    alert("Riflessione avviata: la nuova versione comparirà tra qualche minuto (serve l'abbonamento via Claude Code o una API key).");
   };
-  if (!list.length) return <Empty>Nessuna versione di lezioni.md.</Empty>;
+  if (!list.length) return <RugModel />;
   return (
+    <div className="space-y-4">
+    <RugModel />
     <div className="grid lg:grid-cols-[260px_1fr] gap-4">
       <Section title="Versioni" right={<button className="btn-ghost text-xs" onClick={reflect}>Rifletti ora</button>}>
         <ul className="space-y-1">
@@ -86,6 +89,7 @@ export default function Lessons() {
           {mode === "diff" && !prev && <div className="text-xs text-ink-3 mt-2">Prima versione: nessun confronto disponibile.</div>}
         </Section>
       )}
+    </div>
     </div>
   );
 }
