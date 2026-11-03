@@ -17,5 +17,5 @@ def setup_logging() -> None:
     fh.setFormatter(fmt)
     root.addHandler(ch)
     root.addHandler(fh)
-    for noisy in ("httpx", "httpcore", "apscheduler.executors.default", "anthropic"):
+    for noisy in ("httpx", "httpcore", "apscheduler", "anthropic"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
