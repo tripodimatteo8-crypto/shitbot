@@ -2,15 +2,29 @@
 # Avvio di SolBot con un solo comando: prepara venv, compila la dashboard e lancia il bot.
 # Usato anche dal servizio launchd (che lo riavvia dopo crash o riavvio del Mac).
 set -euo pipefail
+trap 'echo "[start] ERRORE alla riga $LINENO: $BASH_COMMAND" >&2' ERR
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
+echo "[start] SolBot: preparazione in $ROOT"
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/.claude/local:$PATH"
-# nvm (Node e la CLI `claude` installati con nvm non sono nel PATH di launchd)
-if [ -s "$HOME/.nvm/nvm.sh" ]; then
-  set +u; . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1 || true; set -u
-fi
+# Node e la CLI `claude` installati con nvm: aggiungo le loro cartelle al PATH (senza caricare nvm.sh)
+for d in "$HOME"/.nvm/versions/node/*/bin; do
+  if [ -d "$d" ]; then PATH="$d:$PATH"; fi
+done
+export PATH
 mkdir -p logs data
+
+# 0) già in esecuzione? (per esempio come servizio in background launchd)
+PORT_CHECK="$(grep -E '^PORT=' .env 2>/dev/null | cut -d= -f2 || true)"
+PORT_CHECK="${PORT_CHECK:-8787}"
+if curl -s -m 3 "http://127.0.0.1:${PORT_CHECK}/api/overview" >/dev/null 2>&1; then
+  echo "[start] SolBot è GIÀ in esecuzione (probabilmente come servizio in background)."
+  echo "[start] Dashboard: http://127.0.0.1:${PORT_CHECK}"
+  echo "[start] Per riavviarlo:  launchctl kickstart -k gui/\$(id -u)/com.solbot.agent"
+  echo "[start] Per fermarlo:    launchctl bootout gui/\$(id -u)/com.solbot.agent"
+  exit 0
+fi
 
 # 1) .env
 if [ ! -f .env ]; then
