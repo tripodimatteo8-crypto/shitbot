@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+data/*.db*
+logs/
+web/node_modules/
+web/dist/
+.pytest_cache/
+KILL
+.DS_Store
