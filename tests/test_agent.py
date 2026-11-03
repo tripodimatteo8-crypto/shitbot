@@ -48,6 +48,9 @@ def test_claude_cycle_buys_and_skips(fresh_db, monkeypatch):
     monkeypatch.setattr(agent.anthropic, "Anthropic", lambda **kw: client)
     monkeypatch.setattr(env, "anthropic_api_key", "test-key")
     monkeypatch.setattr(env, "decider", "auto")
+    from solbot import claude_cli
+
+    monkeypatch.setattr(claude_cli, "cli_path", lambda: None)  # niente CLI: si usa l'API
 
     res = agent.run_cycle()
     assert res["decider"] == "claude" and res["decided"] == 2

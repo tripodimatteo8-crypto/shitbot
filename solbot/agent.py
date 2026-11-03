@@ -242,7 +242,7 @@ def _summary_line(c: Candidate) -> dict:
 
 
 def choose_decider() -> str:
-    """claude (API) | claude_cli (abbonamento via Claude Code) | baseline (regole)."""
+    """claude_cli (abbonamento via Claude Code, prioritario) | claude (API) | baseline (regole)."""
     from . import claude_cli
 
     d = env.decider
@@ -252,9 +252,10 @@ def choose_decider() -> str:
         return "claude" if env.anthropic_api_key else "baseline"
     if d == "claude_cli":
         return "claude_cli" if claude_cli.available() else "baseline"
-    if env.anthropic_api_key:
-        return "claude"
-    return "claude_cli" if claude_cli.available() else "baseline"
+    # auto: prima l'abbonamento Claude (via Claude Code), poi l'API se c'è la chiave, poi le regole
+    if claude_cli.available():
+        return "claude_cli"
+    return "claude" if env.anthropic_api_key else "baseline"
 
 
 def run_cycle() -> dict:

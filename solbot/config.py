@@ -38,8 +38,8 @@ class Env(BaseSettings):
     live_trading_enabled: bool = False
 
     # auto | claude | claude_cli | baseline
-    # auto = API se c'è ANTHROPIC_API_KEY, altrimenti abbonamento via CLI `claude` se installata,
-    # altrimenti baseline a regole.
+    # auto = abbonamento Claude via CLI `claude` se installata (prioritario), altrimenti API se c'è
+    # ANTHROPIC_API_KEY, altrimenti baseline a regole.
     decider: str = "auto"
     claude_cli_path: str = "claude"
 

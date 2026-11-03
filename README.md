@@ -33,7 +33,7 @@ Senza `ANTHROPIC_API_KEY` il bot **gira lo stesso** con una strategia `baseline`
 ### Usare l'abbonamento Claude (Pro/Max) invece dell'API
 Se non vuoi caricare crediti API, SolBot può usare il tuo abbonamento attraverso Claude Code (`claude -p`).
 1. Claude Code deve essere installato sul Mac e collegato al tuo account: apri il Terminale, lancia `claude`, fai `/login` con l'abbonamento, poi esci.
-2. Lascia `ANTHROPIC_API_KEY` vuota nel `.env` (con `DECIDER=auto` il bot sceglie da solo l'abbonamento) e riavvia il bot.
+2. Riavvia il bot: con `DECIDER=auto` l'abbonamento ha la **priorità** (anche se c'è una API key, che resta solo come riserva).
 3. In dashboard, in alto, compare "decide: claude_cli (abbonamento) · quota X/12 in 5h".
 
 Come consuma la quota:
@@ -41,7 +41,7 @@ Come consuma la quota:
 - la riflessione su `lezioni.md` parte ogni 6 ore, se ci sono almeno 5 decisioni nuove, e conta nella stessa quota;
 - se Claude Code segnala che hai raggiunto il limite, il bot si mette in pausa per 60 minuti e poi riprova. Nel frattempo i candidati vengono comunque misurati;
 - il bot non può leggere la percentuale esatta del tuo limite: 12 chiamate ogni 5h è una stima di circa il 25% di un piano Pro. Controlla il consumo reale con `/usage` in Claude Code e regola `cli_calls_per_window` in Impostazioni;
-- per consumare meno imposta `cli_model` = `sonnet`.
+- per consumare meno imposta `cli_model` = `sonnet`; per usare tutta la sessione (es. in futuro col live) alza `cli_calls_per_window` (per esempio 40-60): quando il limite viene raggiunto il bot si mette in pausa da solo e riparte alla finestra successiva.
 
 La CLI viene lanciata senza strumenti (`--tools ""`), in una cartella vuota, senza ereditare `ANTHROPIC_API_KEY`: risponde solo con un JSON di decisioni, che poi passa dal risk manager come sempre.
 
