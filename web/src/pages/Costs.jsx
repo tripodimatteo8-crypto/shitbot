@@ -29,11 +29,17 @@ export default function Costs() {
                 <Tooltip {...tooltipStyle} cursor={{ fill: "#ffffff08" }} formatter={(v, n) => [usd(v, 3), n]} />
                 <Legend wrapperStyle={{ fontSize: 12, color: "#c3c2b7" }} />
                 <Bar dataKey="decision_usd" name="Decisioni" stackId="a" fill="#3987e5" stroke="#1a1a19" strokeWidth={2} />
-                <Bar dataKey="reflection_usd" name="Riflessione" stackId="a" fill="#d95926" stroke="#1a1a19" strokeWidth={2} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="reflection_usd" name="Riflessione" stackId="a" fill="#d95926" stroke="#1a1a19" strokeWidth={2} />
+                <Bar dataKey="decision_cli_usd" name="Decisioni (abbonamento)" stackId="a" fill="#199e70" stroke="#1a1a19" strokeWidth={2} />
+                <Bar dataKey="reflection_cli_usd" name="Riflessione (abbonamento)" stackId="a" fill="#c98500" stroke="#1a1a19" strokeWidth={2} radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         )}
+        <div className="mt-2 text-xs text-ink-3">
+          Le voci "abbonamento" sono chiamate fatte con Claude Code sul tuo piano: il valore è l'equivalente API stimato dalla CLI e non
+          ti viene addebitato. Il consumo reale della quota lo vedi con /usage in Claude Code.
+        </div>
       </Section>
       <Section title="Dettaglio">
         <div className="overflow-x-auto">

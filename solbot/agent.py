@@ -224,31 +224,48 @@ def _summary_line(c: Candidate) -> dict:
 
 
 def choose_decider() -> str:
-    """claude se c'è la chiave (o se forzato), baseline altrimenti o se DECIDER=baseline."""
-    if env.decider == "baseline" or not env.anthropic_api_key:
+    """claude (API) | claude_cli (abbonamento via Claude Code) | baseline (regole)."""
+    from . import claude_cli
+
+    d = env.decider
+    if d == "baseline":
         return "baseline"
-    return "claude"
+    if d == "claude":
+        return "claude" if env.anthropic_api_key else "baseline"
+    if d == "claude_cli":
+        return "claude_cli" if claude_cli.available() else "baseline"
+    if env.anthropic_api_key:
+        return "claude"
+    return "claude_cli" if claude_cli.available() else "baseline"
 
 
 def run_cycle() -> dict:
+    from . import claude_cli
+
     t = tunables()
+    decider = choose_decider()
     with session_scope() as s:
         acc = ensure_account(s)
         halted = halt_reason(acc)
         n_open = s.query(Position).filter(Position.status == "open").count()
-    cands = _pending_candidates(t.max_candidates_per_cycle)
     if halted:
-        if cands:
-            with session_scope() as s:
-                s.query(Candidate).filter(Candidate.id.in_([c.id for c in cands])).update({"status": "expired"})
+        with session_scope() as s:
+            s.query(Candidate).filter(Candidate.status == "pending").update({"status": "expired"})
         log.warning("Agente fermo: %s", halted)
         return {"skipped": halted}
+    if decider == "claude_cli":
+        ok, why = claude_cli.can_call()
+        if not ok:
+            log.info("Agente (abbonamento) in attesa: %s", why)
+            return {"skipped": why}
+    limit = t.cli_max_candidates if decider == "claude_cli" else t.max_candidates_per_cycle
+    cands = _pending_candidates(limit)
     if not cands:
         log.info("Agente: nessun candidato nuovo (%d posizioni aperte)", n_open)
         return {"candidates": 0}
-    decider = choose_decider()
     lessons, lv = current_lessons()
-    ctx = CycleContext(decider, t.claude_model if decider == "claude" else None, lv, {c.mint: c.id for c in cands})
+    model = t.claude_model if decider == "claude" else (t.cli_model or "abbonamento") if decider == "claude_cli" else None
+    ctx = CycleContext(decider, model, lv, {c.mint: c.id for c in cands})
     if decider == "claude":
         ok, why = budget_ok()
         if not ok:
@@ -262,11 +279,97 @@ def run_cycle() -> dict:
             log_event("error", "agent", f"Errore API Claude {e.status_code}: {e.message}")
         except anthropic.APIConnectionError as e:
             log.error("Connessione a Claude fallita: %s", e)
+    elif decider == "claude_cli":
+        _run_cli(ctx, cands, lessons)
     else:
         _run_baseline(ctx, cands)
     # candidati senza decisione: restano pending fino a scadenza (verranno ripresi al prossimo ciclo)
     log.info("Ciclo %s: %d candidati, %d decisi", decider, len(cands), len(ctx.decided))
     return {"candidates": len(cands), "decided": len(ctx.decided), "decider": decider}
+
+
+CLI_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "decisions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "mint": {"type": "string"},
+                    "action": {"type": "string", "enum": ["buy", "skip"]},
+                    "usd_amount": {"type": "number"},
+                    "reason": {"type": "string"},
+                    "confidence": {"type": "number"},
+                },
+                "required": ["mint", "action", "reason", "confidence"],
+            },
+        },
+        "sells": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"mint": {"type": "string"}, "reason": {"type": "string"}, "confidence": {"type": "number"}},
+                "required": ["mint", "reason", "confidence"],
+            },
+        },
+        "summary": {"type": "string"},
+    },
+    "required": ["decisions"],
+}
+
+CLI_INSTRUCTIONS = """
+## Formato di risposta (modalità senza strumenti)
+In questa modalità non hai strumenti: tutti i dati che ti servono sono nel messaggio (riepilogo, report di sicurezza e storico prezzi di ogni candidato, portafoglio).
+Rispondi SOLO con un oggetto JSON:
+{"decisions": [{"mint": "...", "action": "buy" | "skip", "usd_amount": numero (solo per buy), "reason": "...", "confidence": 0-1}, ...],
+ "sells": [{"mint": "...", "reason": "...", "confidence": 0-1}],   // solo posizioni aperte da chiudere ora, altrimenti []
+ "summary": "una riga"}
+Una voce in "decisions" per OGNI candidato elencato.
+"""
+
+
+def _run_cli(ctx: CycleContext, cands: list[Candidate], lessons: str) -> None:
+    from . import claude_cli
+
+    details = []
+    for c in cands:
+        d = _summary_line(c)
+        sec = get_security(c.mint)
+        if sec:
+            d["security"] = {k: v for k, v in sec.to_dict().items() if k not in ("mint", "sniper_pct", "bundle_pct", "smart_money_buys")}
+        hist = tool_get_token_data(c.mint).get("history_utc")
+        if hist:
+            d["history_utc"] = hist[-12:]
+        details.append(d)
+    prompt = (
+        f"Ora (UTC): {utcnow().strftime('%Y-%m-%d %H:%M')}\n\n"
+        f"Portafoglio:\n{json.dumps(tool_get_portfolio(), ensure_ascii=False)}\n\n"
+        f"Candidati di questo ciclo ({len(cands)}), già filtrati:\n"
+        + "\n".join(json.dumps(d, ensure_ascii=False, default=str) for d in details)
+        + "\n\nRispondi con il JSON richiesto."
+    )
+    system = SYSTEM_PROMPT.replace("Il tuo compito in ogni ciclo:", "Il tuo compito in ogni ciclo (vedi formato di risposta in fondo):") + lessons + CLI_INSTRUCTIONS
+    out = claude_cli.run(prompt, system, CLI_SCHEMA, "decision_cli")
+    if not out:
+        return
+    if out.get("summary"):
+        log.info("Claude (abbonamento): %s", str(out["summary"])[:400])
+    for d in out.get("decisions") or []:
+        mint = d.get("mint")
+        if mint not in ctx.candidate_ids:
+            continue
+        if d.get("action") == "buy":
+            res = execute_tool(ctx, "paper_buy", {"mint": mint, "usd_amount": d.get("usd_amount") or 0,
+                                                  "reason": d.get("reason", ""), "confidence": d.get("confidence")})
+        else:
+            res = execute_tool(ctx, "skip_token", {"mint": mint, "reason": d.get("reason", ""), "confidence": d.get("confidence")})
+        if "error" in res:
+            log.warning("Decisione scartata per %s: %s", mint[:6], res["error"])
+    for sdec in out.get("sells") or []:
+        res = execute_tool(ctx, "paper_sell", {"mint": sdec.get("mint", ""), "reason": sdec.get("reason", ""), "confidence": sdec.get("confidence")})
+        if "error" in res:
+            log.warning("Vendita scartata: %s", res["error"])
 
 
 def _run_claude(ctx: CycleContext, cands: list[Candidate], lessons: str) -> None:

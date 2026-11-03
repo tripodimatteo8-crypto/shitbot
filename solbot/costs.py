@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import func
+from sqlalchemy import func, true
 
 from .config import tunables
 from .db import ClaudeUsage, session_scope
@@ -44,20 +44,20 @@ def _local_midnight_utc() -> datetime:
     return midnight_local - offset
 
 
-def today_usage() -> dict:
+def today_usage(api_only: bool = False) -> dict:
     since = _local_midnight_utc()
     with session_scope() as s:
         calls, inp, out, cr, cw, cost = s.query(
             func.count(ClaudeUsage.id), func.coalesce(func.sum(ClaudeUsage.input_tokens), 0),
             func.coalesce(func.sum(ClaudeUsage.output_tokens), 0), func.coalesce(func.sum(ClaudeUsage.cache_read_tokens), 0),
             func.coalesce(func.sum(ClaudeUsage.cache_write_tokens), 0), func.coalesce(func.sum(ClaudeUsage.cost_usd), 0.0),
-        ).filter(ClaudeUsage.ts >= since).one()
+        ).filter(ClaudeUsage.ts >= since, ~ClaudeUsage.purpose.like("%_cli") if api_only else true()).one()
     return {"calls": calls, "tokens": inp + out + cr + cw, "input": inp, "output": out, "cache_read": cr, "cache_write": cw, "usd": cost}
 
 
 def budget_ok() -> tuple[bool, str]:
     t = tunables()
-    u = today_usage()
+    u = today_usage(api_only=True)
     if u["calls"] >= t.max_claude_calls_per_day:
         return False, f"limite chiamate giornaliere ({u['calls']}/{t.max_claude_calls_per_day})"
     if u["tokens"] >= t.max_claude_tokens_per_day:

@@ -63,10 +63,18 @@ def _dataset(days: int = 7) -> dict:
 
 
 def reflect(trigger: str) -> int | None:
-    if not env.anthropic_api_key:
-        log.info("Riflessione saltata: ANTHROPIC_API_KEY mancante")
+    from .agent import choose_decider
+
+    backend = choose_decider()
+    if backend == "baseline":
+        log.info("Riflessione saltata: né ANTHROPIC_API_KEY né CLI `claude` disponibili")
         return None
-    ok, why = budget_ok()
+    if backend == "claude_cli":
+        from . import claude_cli
+
+        ok, why = claude_cli.can_call(min_spacing=False)
+    else:
+        ok, why = budget_ok()
     if not ok:
         log.warning("Riflessione saltata: %s", why)
         return None
@@ -81,10 +89,13 @@ def reflect(trigger: str) -> int | None:
         f"## Trade chiusi (recenti)\n{json.dumps(data['trades'], ensure_ascii=False)}\n\n"
         f"## Esiti candidati (recenti)\n{json.dumps(data['candidates'], ensure_ascii=False)}"
     )
+    system = REFLECT_SYSTEM.format(cost=m["est_roundtrip_cost_pct"])
+    if backend == "claude_cli":
+        return _reflect_cli(prompt, system, trigger, m)
     client = anthropic.Anthropic(api_key=env.anthropic_api_key, max_retries=3, timeout=600)
     kwargs = dict(
         model=t.claude_model, max_tokens=32000,
-        system=REFLECT_SYSTEM.format(cost=m["est_roundtrip_cost_pct"]),
+        system=system,
         messages=[{"role": "user", "content": prompt}],
         thinking={"type": "adaptive"}, output_config={"effort": "high"},
     )
@@ -111,3 +122,26 @@ def reflect(trigger: str) -> int | None:
     log.info("Nuova versione di lezioni.md (v%d, trigger=%s)", vid, trigger)
     log_event("info", "reflection", f"lezioni.md aggiornato alla versione {vid} ({trigger})")
     return vid
+
+
+def _save(text: str, trigger: str, model: str, m: dict) -> int | None:
+    text = (text or "").strip()
+    if len(text) < 50:
+        log.warning("Riflessione vuota, lezioni invariate")
+        return None
+    total, _ = _closed_since_last_reflection()
+    vid = save_lessons(text + "\n", trigger, model, m, total)
+    log.info("Nuova versione di lezioni.md (v%d, trigger=%s)", vid, trigger)
+    log_event("info", "reflection", f"lezioni.md aggiornato alla versione {vid} ({trigger})")
+    return vid
+
+
+def _reflect_cli(prompt: str, system: str, trigger: str, m: dict) -> int | None:
+    from . import claude_cli
+
+    schema = {"type": "object", "properties": {"lessons_md": {"type": "string"}}, "required": ["lessons_md"]}
+    system += "\nRestituisci un oggetto JSON con un solo campo `lessons_md` che contiene il nuovo lezioni.md completo."
+    out = claude_cli.run(prompt, system, schema, "reflection_cli", timeout=900)
+    if not out:
+        return None
+    return _save(out.get("lessons_md", ""), trigger, tunables().cli_model or "abbonamento", m)

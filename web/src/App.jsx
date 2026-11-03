@@ -68,6 +68,13 @@ export default function App() {
               <span className="text-ink-3">
                 · decide: <b className="text-ink-2">{ov.data.decider}</b>
                 {ov.data.decider === "claude" ? ` (${ov.data.model})` : ""}
+                {ov.data.decider === "claude_cli" ? " (abbonamento)" : ""}
+              </span>
+            )}
+            {ov.data?.cli_quota && (
+              <span className="text-ink-3" title="chiamate all'abbonamento nella finestra corrente">
+                · quota {ov.data.cli_quota.used}/{ov.data.cli_quota.max} in {ov.data.cli_quota.window_hours}h
+                {ov.data.cli_quota.paused_until ? " · in pausa (limite raggiunto)" : ""}
               </span>
             )}
           </div>

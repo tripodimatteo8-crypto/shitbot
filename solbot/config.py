@@ -37,8 +37,11 @@ class Env(BaseSettings):
     # letta qui: la legge solo il LiveEngine al momento dell'uso.
     live_trading_enabled: bool = False
 
-    # "auto" = Claude se c'è la chiave, altrimenti baseline a regole.
+    # auto | claude | claude_cli | baseline
+    # auto = API se c'è ANTHROPIC_API_KEY, altrimenti abbonamento via CLI `claude` se installata,
+    # altrimenti baseline a regole.
     decider: str = "auto"
+    claude_cli_path: str = "claude"
 
 
 class Tunables(BaseSettings):
@@ -61,6 +64,17 @@ class Tunables(BaseSettings):
     max_claude_usd_per_day: float = 15.0
     max_candidates_per_cycle: int = 6
     reflect_every_n_closed_trades: int = 15
+
+    # --- Claude via abbonamento (CLI `claude -p`) ---
+    # Quota spalmata: al massimo N chiamate per finestra di ore (le chiamate vengono distanziate
+    # in modo uniforme). 12 ogni 5h è una stima di ~25% di un piano Pro: regolala guardando /usage.
+    cli_calls_per_window: int = 12
+    cli_window_hours: float = 5.0
+    cli_model: str = ""  # vuoto = modello di default del tuo abbonamento (es. "opus", "sonnet")
+    cli_timeout_s: int = 300
+    cli_pause_minutes_on_limit: int = 60
+    cli_reflect_every_hours: float = 6.0
+    cli_max_candidates: int = 8
 
     # --- Filtri hard (codice, non LLM) ---
     min_liquidity_usd: float = 15_000

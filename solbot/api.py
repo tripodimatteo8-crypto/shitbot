@@ -62,6 +62,10 @@ def overview():
         "model": t.claude_model, "jobs": scheduler.jobs_status(), "costs_today": today_usage(),
         "live_enabled": env.live_trading_enabled, "engine": "paper",
     })
+    if res["decider"] == "claude_cli":
+        from . import claude_cli
+
+        res["cli_quota"] = claude_cli.quota_status()
     return res
 
 

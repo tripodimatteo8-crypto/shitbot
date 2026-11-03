@@ -48,6 +48,30 @@ def monitor_positions() -> None:
         maybe_reflect_on_trades()
 
 
+def reflect_daily() -> None:
+    from .agent import choose_decider
+
+    if choose_decider() == "claude":
+        reflect("daily")
+
+
+def reflect_periodic_cli() -> None:
+    """Con l'abbonamento: riflessione ogni N ore (default 6), se ci sono dati nuovi."""
+    from .agent import choose_decider
+    from .db import Decision, LessonVersion
+
+    if choose_decider() != "claude_cli":
+        return
+    with session_scope() as s:
+        last = s.query(LessonVersion).order_by(LessonVersion.id.desc()).first()
+        since = last.ts if last else utcnow() - timedelta(days=1)
+        new_decisions = s.query(Decision).filter(Decision.ts > since).count()
+    if new_decisions < 5:
+        log.info("Riflessione periodica saltata: solo %d decisioni nuove", new_decisions)
+        return
+    reflect("periodic")
+
+
 def prune() -> None:
     cutoff = utcnow() - timedelta(days=14)
     with session_scope() as s:
@@ -71,7 +95,9 @@ def start() -> BackgroundScheduler:
     s.add_job(_safe("monitor", monitor_positions), "interval", seconds=t.monitor_interval_s, id="monitor", next_run_time=now + timedelta(seconds=20))
     s.add_job(_safe("evaluate", evaluate_candidates), "interval", seconds=t.evaluate_interval_s, id="evaluate")
     s.add_job(_safe("equity", heartbeat), "interval", seconds=300, id="equity", next_run_time=now + timedelta(seconds=5))
-    s.add_job(_safe("reflect_daily", lambda: reflect("daily")), "cron", hour=3, minute=17, id="reflect_daily")
+    s.add_job(_safe("reflect_daily", reflect_daily), "cron", hour=3, minute=17, id="reflect_daily")
+    s.add_job(_safe("reflect_cli", reflect_periodic_cli), "interval", hours=t.cli_reflect_every_hours, id="reflect_cli",
+              next_run_time=now + timedelta(minutes=20))
     s.add_job(_safe("prune", prune), "cron", hour=4, minute=41, id="prune")
     s.start()
     _sched = s

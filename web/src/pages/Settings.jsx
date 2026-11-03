@@ -8,6 +8,7 @@ const GROUPS = [
   ["Costi simulati", ["swap_fee_pct", "priority_fee_sol", "network_fee_sol", "mev_buffer_pct", "execution_delay_s", "fallback_slippage_floor_pct"]],
   ["Cicli (secondi)", ["collect_interval_s", "agent_interval_s", "monitor_interval_s", "evaluate_interval_s"]],
   ["Claude", ["claude_model", "claude_effort", "claude_fallbacks", "max_claude_calls_per_day", "max_claude_tokens_per_day", "max_claude_usd_per_day", "max_candidates_per_cycle", "reflect_every_n_closed_trades"]],
+  ["Claude via abbonamento (Claude Code)", ["cli_calls_per_window", "cli_window_hours", "cli_model", "cli_max_candidates", "cli_reflect_every_hours", "cli_pause_minutes_on_limit", "cli_timeout_s"]],
   ["Gate paper → live", ["gate_min_days", "gate_min_trades", "gate_min_pnl_usd", "gate_max_drawdown_pct", "gate_min_profit_factor"]],
 ];
 

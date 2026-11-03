@@ -5,7 +5,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/.claude/local:$PATH"
+# nvm (Node e la CLI `claude` installati con nvm non sono nel PATH di launchd)
+if [ -s "$HOME/.nvm/nvm.sh" ]; then
+  set +u; . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1 || true; set -u
+fi
 mkdir -p logs data
 
 # 1) .env
